@@ -6,6 +6,7 @@
  * 			Tyralyn Tran
  *
  * Version: v0.0000000000000000000001
+ * http://www.binarytides.com/raw-sockets-packets-with-winpcap/
  *
  * Instructions for installing WinPcap + libs: http://www.codeproject.com/Articles/30234/Introduction-to-the-WinPcap-Networking-Libraries
  *		Don't forget to add pcap library to PATH!
@@ -17,6 +18,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <iostream>
+#include <string.h>
 
 // Stuff for WinPcap. The defines are super important for linking.
 #define WPCAP
@@ -24,12 +26,10 @@
 #include "pcap.h"
 
 // Winsock includes.
-//#include <Winsock2.h>
-#include <windows.h>
 #include <netinet/in.h>
-
 #include <windows.h>
-
+#include <Winsock2.h>
+#include <iphlpapi.h>
 // Constants
 #define CAPTURE_BYTES 65536 // Number of bytes to capture, per packet. Set absurdly high to capture full packet.
 
@@ -114,14 +114,25 @@ typedef struct icmp_hdr
 // To be registered as a callback function for WinPcap - called whenever a packet is captured.
 void decode_packet(u_char *param, const struct pcap_pkthdr *header, const u_char *pkt_data);
 
-int main() {
+//Forward declaration of method called to construct raw header for TCP SYN packet
+u_char* constructPacket();
+
+int main(int argc, char* argv[]) {
     pcap_if_t *alldevs;	// list of all capture devices.
     char errbuf[PCAP_ERRBUF_SIZE]; // cstring used by winpcap for error messages.
+	
+	//string ipArg;
+	//in_addr destIP;
+	//destIP.s_addr=0;
+	char* a;
+	
+	//destIp->S_un_b = (u_char) arg
 
     // Grab device list. Freak out if error occurs. This function doesn't like to be run from IDEs - run exe directly!
     if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &alldevs, errbuf) == -1)
     	{ fprintf(stderr,"Error in pcap_findalldevs_ex: %s\n", errbuf); exit(1); }
 
+	a=alldevs->name;
     // Print info for all found devices.
     int i = 0;
     pcap_if_t *d;
@@ -129,7 +140,9 @@ int main() {
     	cout<<++i<<": "<<d->name;
         if (d->description) cout<<"  - "<<d->description<<endl;
         else cout<<"  - No description."<<endl;
+		cout<<"address: "<<d->addresses<<endl;
     }
+	cout<<"address: "<<a<<endl;
 
     // If no devices found (ie none were printed), exit.
     if (i == 0)
@@ -145,6 +158,8 @@ int main() {
     // Re-traverse device list to selected adapter.
     for(d=alldevs, i=0; i< iface-1 ;d=d->next, i++);
 
+	
+	
     // Open device in WinPcap.
     pcap_t *capture;
 	if ( (capture=pcap_open(d->name,            // name of the device
@@ -187,20 +202,8 @@ int main() {
     }
 	else 
 		cout<<"packet sent! "<< d->name<<endl;
+	//constructPacket();
 	
-	
-    /*if( (capture = pcap_open(	d->name,					// Device to be opened (selected by dname).
-    							CAPTURE_BYTES,				// Bytes to capture in each packet.
-    							PCAP_OPENFLAG_PROMISCUOUS,	// Set to promiscuous mode - will capture ALL traffic on network.
-    							1000,						// Timeout value (ms)
-    							NULL,						// Authentication info for remote capture. Unused for sniffing.
-    							errbuf						// Error string.
-    						 )  ) == NULL ) {
-    	// Error handling - usually if adapter is incompatible.
-    	fprintf(stderr,"\nUnable to open the adapter. %s is not supported by WinPcap\n", d->name);
-    	pcap_freealldevs(alldevs);
-    	exit(1);
-    }*/
     cout<<endl<<"Now listening on "<<d->description<<"..."<<endl;
 
     // Free device list now that we're done with it.
@@ -212,44 +215,32 @@ int main() {
     return 0;
 }
 
-void print_eth_hdr(eth_header *eth){
-	cout<<"\tEthernet Header :"<<endl;
-	printf("\t |Dest : %.2x-%.2x-%.2x-%.2x-%.2x-%.2x\n", eth->dest[0], eth->dest[1], eth->dest[2], eth->dest[3], eth->dest[4], eth->dest[5]);
-	printf("\t |Src  : %.2x-%.2x-%.2x-%.2x-%.2x-%.2x\n", eth->source[0], eth->source[1], eth->source[2], eth->source[3], eth->source[4], eth->source[5]);
-	cout<<"\t |Proto: "<<eth->type<<endl;
-}
-void print_ip_hdr(ip_header *ip){
-	cout<<"\tIP Header :"<<endl;
-	printf("\t |Version : %d |HLEN : %d |DCSP : %d |ECN : %d |Total Length : %d\n", (u_int)ip->ver, (u_int)ip->hlen, (u_int)ip->dhcp, (u_int)ip->ecn, (u_int)ip->tlen);
-	printf("\t |Identification : %d |Flags : %d%d%d | Fragmentation Offset: %d\n", ip->id, (u_int)ip->zero, (u_int)ip->dfrag, (u_int)ip->mfrag, (u_int)ip->fragoffset);
-	printf("\t |Time to Live : %d |Protocol : %d |Header Checksum : %d\n", (u_int)ip->ttl, (u_int)ip->proto, ip->crc);
-	printf("\t |Source : %d.%d.%d.%d\n", ip->src.byte1, ip->src.byte2, ip->src.byte3, ip->src.byte4);
-	printf("\t |Destination : %d.%d.%d.%d\n", ip->dest.byte1, ip->dest.byte2, ip->dest.byte3, ip->dest.byte4);
-}
-
-void print_udp_hdr(const u_char*pkt_data) {
-	unsigned short iphdrlen;
-	eth_header* ethhdr = (eth_header *)pkt_data;
-    ip_header* iphdr = (ip_header*)(pkt_data + sizeof(ethhdr));
-    iphdrlen = iphdr->hlen*4;
-	udp_header* udphdr= (udp_header*)( pkt_data+ iphdrlen + sizeof(ethhdr) );
-	printf("\t |Src Port: %u |Dst Port: %u\n", udphdr->sport, udphdr->dport);
-	printf("\t |HLEN: %u | Checksum: %u\n", udphdr->len, udphdr->crc);
+void GetMacAddress(unsigned char *mac , in_addr destip) 
+{
+    DWORD ret;
+    in_addr srcip;
+    ULONG MacAddr[2];
+    ULONG PhyAddrLen = 6;  /* default to length of six bytes */
+  
+    srcip.s_addr=0;
+ 
+    //Now print the Mac address also
+    ret = SendArp(destip , srcip , MacAddr , &PhyAddrLen);
+    if(PhyAddrLen) {
+        BYTE *bMacAddr = (BYTE *) & MacAddr;
+        for (int i = 0; i < (int) PhyAddrLen; i++) 
+            mac[i] = (char)bMacAddr[i];
+    }
 }
 
-void print_tcp_hdr(const u_char* pkt_data) {	
-	unsigned short iphdrlen;
-	eth_header* ethhdr = (eth_header *)pkt_data;
-    ip_header* iphdr = (ip_header*)(pkt_data + sizeof(ethhdr));
-    iphdrlen = iphdr->hlen*4;
-	tcp_header* tcphdr= (tcp_header*)( pkt_data+ iphdrlen + sizeof(ethhdr) );
-	cout<<"\tTCP Header:"<<endl;
-	printf("\t |Src Port: %u |Dst Port: %u\n", tcphdr->sport, tcphdr->dport);
-	printf("\t |Seq Num: %d\n", tcphdr->sequence);
-	printf("\t |Ack Num: %d\n", tcphdr->acknowledge);
-	printf("\t |HLEN: %d |URG %d |ACK %d |PUSH %d |RST %d |SYN %d |FIN %d |Rcv Win: %u \n", (u_int)tcphdr->data_offset*4, (u_int)tcphdr->urg, (u_int)tcphdr->ack, (u_int)tcphdr->psh, (u_int)tcphdr->rst, (u_int)tcphdr->syn, (u_int)tcphdr->fin, ntohs(tcphdr->window));
-	printf("\t |Checksum: %u |Urg Ptr: %u\n", ntohs(tcphdr->checksum), tcphdr->urgent_pointer);
-}
+/*u_char* constructPacket(u_char ip) {
+	u_char* packet;
+	packet = new u_char[65536];
+	in
+	GetMacAddress(s_mac , srcip);
+	printf("Selected device has mac address : %.2X-%.2X-%.2X-%.2X-%.2X-%.2X",s_mac[0],s_mac[1],s_mac[2],s_mac[3],s_mac[4],s_mac[5]);
+	return packet;
+}*/
 
 // Packet decoder - takes a packet and figures out protocol. Passes along to appropriate helper.
 void decode_packet(u_char *param, const struct pcap_pkthdr *header, const u_char *pkt_data) {
@@ -260,54 +251,24 @@ void decode_packet(u_char *param, const struct pcap_pkthdr *header, const u_char
 	char timestamp[16];
 	strftime(timestamp, sizeof timestamp, "%H:%M:%S", time);
 
-	// Print capture time and length of packet.
-	//cout<<"Packet Captured : "<<timestamp<<" (Length : "<<header->len<<" bytes)"<<endl;
-	cout<<"Packet Captured : "<<timestamp<<" (Length : "<<header->len<<" bytes)"<<endl;
-
-	// Get ethernet header
-	eth_header *eth = (eth_header *)pkt_data;
-
 	// Get ip header
 	ip_header *ip = (ip_header *) (pkt_data + sizeof(eth_header));
 
 	// Figure out the protocol of the packet
 	switch(ip->proto) {
 		case 1: // ICMP
-			//cout<<endl<<"ICMP PACKET : "<<endl;
-			//print_eth_hdr(eth);
-			//print_ip_hdr(ip);
 			break;
 		case 2: // IGMP
-			//cout<<endl<<"IGMP PACKET : "<<endl;
-			//print_eth_hdr(eth);
-			//print_ip_hdr(ip);
-			//print_eth_hdr(eth);
-			//print_ip_hdr(ip);
 			break;
 		case 3: // IGMP
-			//cout<<endl<<"IGMP PACKET : "<<endl;
-			//print_eth_hdr(eth);
-			//print_ip_hdr(ip);
 			break;
 		case 4: // TCP
-			//cout<<endl<<"TCP PACKET : "<<endl;
-			//print_eth_hdr(eth);
-			//print_ip_hdr(ip);
-			///print_tcp_hdr(pkt_data);
 			break;
 		case 5:// UDP
-			//cout<<endl<<"UDP PACKET : "<<endl;
-			//print_eth_hdr(eth);
-			//print_ip_hdr(ip);
-			//print_udp_hdr(pkt_data);
 			break;
 		case 6:// UDP
-			//cout<<endl<<"UDP PACKET : "<<endl;
-			//print_eth_hdr(eth);
-			//print_ip_hdr(ip);
 			break;
 		default:
-			//cout<<ip->proto<<endl;
 			break;
 	}
 }
